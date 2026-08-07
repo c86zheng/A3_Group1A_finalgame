@@ -28,8 +28,11 @@ const AssetPaths = Object.freeze({
   startImage: "assets/img/Start.png",
   controlsImage: "assets/img/Options.png",
   winImage: "assets/img/AllBooks.png",
-  storyVideo: "assets/video/story.mp4",
-  storyAudio: "assets/sound/story.mp4",
+  storyImage: "assets/img/storyline.png",
+  storyAudio: "assets/sound/story.mp3",
+  wakeupSound: "assets/sound/Wakeup.mp3",
+  robotVoiceSound: "assets/sound/beepbeep.mp3",
+  facilitySound: "assets/sound/Facility.mp3",
   tiledStartImageLayer: "../img/Start.png",
   bgm: "assets/sound/bgm.wav",
   buttonSound: "assets/sound/buttonon.mp3",
@@ -133,7 +136,11 @@ const PhysicsConfig = Object.freeze({
 const AudioConfig = Object.freeze({
   bgmVolume: 0.5,
   soundEffectVolume: 0.3,
-  buttonSoundVolume: 1
+  buttonSoundVolume: 1,
+  storyVolume: 0.01,
+  wakeupVolume: 0.55,
+  robotVoiceVolume: 0.28,
+  facilityVolume: 0.01
 });
 
 /** Default behavior for mode blocks when the Tiled object does not override it. */
@@ -171,8 +178,15 @@ const GAME_CONFIG = {
   startImagePath: AssetPaths.startImage,
   controlsImagePath: AssetPaths.controlsImage,
   winImagePath: AssetPaths.winImage,
-  storyVideoPath: AssetPaths.storyVideo,
+  storyImagePath: AssetPaths.storyImage,
   storyAudioPath: AssetPaths.storyAudio,
+  wakeupSoundPath: AssetPaths.wakeupSound,
+  robotVoiceSoundPath: AssetPaths.robotVoiceSound,
+  facilitySoundPath: AssetPaths.facilitySound,
+  storyVolume: AudioConfig.storyVolume,
+  wakeupVolume: AudioConfig.wakeupVolume,
+  robotVoiceVolume: AudioConfig.robotVoiceVolume,
+  facilityVolume: AudioConfig.facilityVolume,
   tiledStartImageLayerPath: AssetPaths.tiledStartImageLayer,
   bgmPath: AssetPaths.bgm,
   bgmVolume: AudioConfig.bgmVolume,
@@ -224,6 +238,47 @@ const GAME_CONFIG = {
   }
 };
 
+
+
+/**
+ * Timing and presentation data for the opening cutscene.
+ * Keeping the timeline data outside the render functions makes the scene easy
+ * to retime without changing animation code.
+ */
+const INTRO_CONFIG = Object.freeze({
+  durationMs: 36000,
+  revealStartMs: 10800,
+  revealEndMs: 14500,
+  standStartMs: 15400,
+  standEndMs: 18300,
+  memoryStartMs: 25800,
+  memoryEndMs: 29200,
+  systemStartMs: 29400,
+  robot: Object.freeze({ x: 188, y: 423, w: 64, h: 64 }),
+  dialogueBox: Object.freeze({ x: 118, y: 410, w: 724, h: 104 }),
+  beats: Object.freeze([
+    Object.freeze({ start: 0, end: 2100, kind: "sound", text: "Hmmmmmm…", note: "humming sounds" }),
+    Object.freeze({ start: 2100, end: 3400, kind: "sound", text: "Clink clunk", note: "metal shifting" }),
+    Object.freeze({ start: 3400, end: 5600, kind: "system", text: "BEEP  BEEP  BEEP", note: "PRISM-256 activated" }),
+    Object.freeze({ start: 6100, end: 8300, kind: "dialogue", text: "Where am I?" }),
+    Object.freeze({ start: 8300, end: 10400, kind: "dialogue", text: "Where is everyone else?" }),
+    Object.freeze({ start: 10400, end: 12700, kind: "dialogue", text: "I can’t sense anyone…" }),
+    Object.freeze({ start: 13700, end: 16000, kind: "dialogue", text: "Everything is so grey…" }),
+    Object.freeze({ start: 16600, end: 18400, kind: "sound", text: "Hmmm… zzzzzz…", note: "winding sounds" }),
+    Object.freeze({ start: 18400, end: 20100, kind: "sound", text: "Clink clunk", note: "standing up" }),
+    Object.freeze({ start: 20100, end: 22000, kind: "dialogue", text: "Everything is down." }),
+    Object.freeze({ start: 22000, end: 23900, kind: "dialogue", text: "What is this place?" }),
+    Object.freeze({ start: 23900, end: 26400, kind: "dialogue", text: "It feels very familiar but different…" }),
+    Object.freeze({ start: 27200, end: 29400, kind: "dialogue", text: "The underground facilities…?" })
+  ]),
+  systemLines: Object.freeze([
+    Object.freeze({ at: 30100, label: "MISSION", text: "Restore Chroma Network integrity." }),
+    Object.freeze({ at: 31600, label: "MISSION", text: "Find ???" }),
+    Object.freeze({ at: 32800, label: "STATUS", text: "Interpretation system degraded" }),
+    Object.freeze({ at: 34200, label: "FALLBACK TOOL", text: "Contrast Scanner available." })
+  ])
+});
+
 const MODES = ["colorBlindness", "redBlindness", "blueBlindness"];
 const MODE_LABELS = {
   colorBlindness: "Color Blindness",
@@ -253,6 +308,11 @@ class ChromasightGame {
     this.currentRespawnName = "";
     this.pendingStoryLevelName = null;
     this.pendingStorySpawnName = null;
+    this.storyStartedAt = 0;
+    this.storyElapsedMs = 0;
+    this.storyComplete = false;
+    this.storyWakeupPlayed = false;
+    this.lastStoryBeatIndex = -1;
     this.totalBooks = countBooksInMaps(this.assets.maps || {});
     this.collectedBookKeys = collectedBookKeysFromSave(this.assets.maps || {}, this.saveData);
     this.collectedBooks = this.collectedBookKeys.size;
@@ -265,11 +325,11 @@ class ChromasightGame {
       name: "Back"
     };
     this.storyPlayButton = {
-      x: GAME_CONFIG.canvasWidth - 278,
+      x: GAME_CONFIG.canvasWidth - 318,
       y: GAME_CONFIG.canvasHeight - 62,
-      w: 118,
+      w: 158,
       h: 42,
-      name: "Play"
+      name: "Continue"
     };
     this.storySkipButton = {
       x: GAME_CONFIG.canvasWidth - 148,
@@ -345,8 +405,45 @@ class ChromasightGame {
     this.pendingStorySpawnName = spawnName;
     this.cameraX = 0;
     this.cameraY = 0;
+    this.storyStartedAt = typeof millis === "function" ? millis() : Date.now();
+    this.storyElapsedMs = 0;
+    this.storyComplete = false;
+    this.storyWakeupPlayed = false;
+    this.lastStoryBeatIndex = -1;
     if (typeof bgm !== "undefined" && bgm && bgm.isPlaying()) bgm.stop();
-    if (typeof playStoryMedia === "function") playStoryMedia();
+    if (typeof playStoryScene === "function") playStoryScene();
+  }
+
+  /** Advances only the opening cutscene clock. Gameplay physics stay paused. */
+  updateStory() {
+    const now = typeof millis === "function" ? millis() : Date.now();
+    this.storyElapsedMs = Math.max(0, now - this.storyStartedAt);
+    this.storyComplete = this.storyElapsedMs >= INTRO_CONFIG.durationMs;
+
+    // Wake-up SFX begins with the first mechanical clink.
+    if (!this.storyWakeupPlayed && this.storyElapsedMs >= 2100) {
+      this.storyWakeupPlayed = true;
+      if (typeof playWakeupSound === "function") playWakeupSound();
+    }
+
+    // Play PRISM's electronic voice beep once at the start of each dialogue beat.
+    const activeBeatIndex = INTRO_CONFIG.beats.findIndex((beat) => (
+      this.storyElapsedMs >= beat.start && this.storyElapsedMs < beat.end
+    ));
+    if (activeBeatIndex !== this.lastStoryBeatIndex) {
+      this.lastStoryBeatIndex = activeBeatIndex;
+      const beat = INTRO_CONFIG.beats[activeBeatIndex];
+      if (beat?.kind === "dialogue" && typeof playRobotVoiceSound === "function") {
+        playRobotVoiceSound();
+      }
+    }
+  }
+
+  /** Returns the dialogue/sound beat currently active in the cutscene. */
+  getActiveStoryBeat() {
+    return INTRO_CONFIG.beats.find((beat) => (
+      this.storyElapsedMs >= beat.start && this.storyElapsedMs < beat.end
+    )) || null;
   }
 
   skipStory() {
@@ -483,6 +580,10 @@ class ChromasightGame {
   }
 
   update(keys) {
+    if (this.scene === "story") {
+      this.updateStory();
+      return;
+    }
     if (this.scene !== "level") return;
 
     if (this.messageTimer > 0) this.messageTimer -= 1;
@@ -928,8 +1029,8 @@ class ChromasightGame {
     }
 
     if (this.scene === "story") {
-      if (pointInRect(x, y, this.storyPlayButton)) {
-        if (typeof toggleStoryPlayback === "function") toggleStoryPlayback();
+      if (this.storyComplete && pointInRect(x, y, this.storyPlayButton)) {
+        this.skipStory();
         return true;
       }
 

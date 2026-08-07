@@ -1,5 +1,5 @@
 {
-    "activeFile": "level_2.tmj",
+    "activeFile": "level_1.tmj",
     "expandedProjectPaths": [
         "."
     ],
@@ -9,8 +9,8 @@
             "scale": 1,
             "selectedLayer": 1,
             "viewCenter": {
-                "x": 480,
-                "y": 272
+                "x": 480.5,
+                "y": 271.5
             }
         },
         "level_1.tmj": {
@@ -18,11 +18,11 @@
                 11,
                 2
             ],
-            "scale": 2,
+            "scale": 1,
             "selectedLayer": 0,
             "viewCenter": {
-                "x": 1653,
-                "y": 537.75
+                "x": 1814.5,
+                "y": 505
             }
         },
         "level_1.tmx": {
@@ -39,15 +39,15 @@
         },
         "level_2.tmj": {
             "expandedObjectLayers": [
-                2,
                 3,
-                6
+                6,
+                2
             ],
-            "scale": 1.5,
-            "selectedLayer": 1,
+            "scale": 1,
+            "selectedLayer": 0,
             "viewCenter": {
-                "x": 969.3333333333333,
-                "y": 687
+                "x": 1810.5,
+                "y": 76
             }
         },
         "level_3.tmj": {
@@ -55,11 +55,11 @@
                 3,
                 6
             ],
-            "scale": 0.75,
-            "selectedLayer": 4,
+            "scale": 1,
+            "selectedLayer": 0,
             "viewCenter": {
-                "x": 1058.6666666666665,
-                "y": 564.6666666666666
+                "x": 336.5,
+                "y": 414
             }
         },
         "robotFighter.tsx": {
@@ -68,7 +68,7 @@
             "scaleInEditor": 4
         },
         "tiles_packed.tsx": {
-            "scaleInDock": 1,
+            "scaleInDock": 0.33,
             "scaleInEditor": 1
         }
     },
@@ -91,10 +91,10 @@
     "property.type": "collectible",
     "recentFiles": [
         "tiles_packed.tsx",
-        "level_1.tmj",
         "Start.tmj",
         "level_3.tmj",
         "level_2.tmj",
+        "level_1.tmj",
         "level_1.tmx",
         "robotFighter.tsx"
     ],

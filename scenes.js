@@ -55,41 +55,296 @@ ChromasightGame.prototype.drawWinScreen = function () {
 };
 
 ChromasightGame.prototype.drawStoryScreen = function () {
+  const elapsed = this.storyElapsedMs || 0;
+
   push();
   noStroke();
   fill(0);
   rect(0, 0, width, height);
 
-  if (this.assets.storyVideo) {
-    drawMediaCover(this.assets.storyVideo, 0, 0, width, height);
+  this.drawStoryEnvironment(elapsed);
+  this.drawStoryRobot(elapsed);
+
+  if (elapsed >= INTRO_CONFIG.memoryStartMs && elapsed < INTRO_CONFIG.memoryEndMs) {
+    this.drawStoryMemoryGlitch(elapsed);
   }
 
-  const isPlaying = Boolean(this.assets.storyVideo?.elt && !this.assets.storyVideo.elt.paused && !this.assets.storyVideo.elt.ended);
-  this.drawMenuButton(this.storyPlayButton, isPlaying ? "Pause" : "Play");
-  this.drawMenuButton(this.storySkipButton, "Skip");
+  if (elapsed >= INTRO_CONFIG.systemStartMs) {
+    this.drawStorySystemPopup(elapsed);
+  } else {
+    const beat = this.getActiveStoryBeat();
+    if (beat) this.drawStoryBeat(beat, elapsed);
+  }
+
+  if (!this.storyComplete) {
+    this.drawStorySkipButton();
+  } else {
+    this.drawMenuButton(this.storyPlayButton, "Continue");
+    this.drawMenuButton(this.storySkipButton, "Skip");
+  }
+
+  this.drawStoryScanlines();
   pop();
 };
 
-function drawMediaCover(media, dx, dy, dw, dh) {
-  const sourceWidth = media?.elt?.videoWidth || media?.width || dw;
-  const sourceHeight = media?.elt?.videoHeight || media?.height || dh;
-  const sourceAspect = sourceWidth / sourceHeight;
-  const destAspect = dw / dh;
+ChromasightGame.prototype.drawStoryEnvironment = function (elapsed) {
+  if (!this.assets.storyImage || elapsed < INTRO_CONFIG.revealStartMs) return;
 
-  let sx = 0;
-  let sy = 0;
-  let sw = sourceWidth;
-  let sh = sourceHeight;
+  const reveal = constrain(
+    map(elapsed, INTRO_CONFIG.revealStartMs, INTRO_CONFIG.revealEndMs, 0, 1),
+    0,
+    1
+  );
+  const slowPan = constrain(map(elapsed, INTRO_CONFIG.revealStartMs, INTRO_CONFIG.durationMs, 0, 1), 0, 1);
+  const zoom = 1.045 - slowPan * 0.025;
+  const drawW = width * zoom;
+  const drawH = height * zoom;
+  const drawX = -(drawW - width) * (0.30 + slowPan * 0.18);
+  const drawY = -(drawH - height) * 0.55;
 
-  if (sourceAspect > destAspect) {
-    sw = sourceHeight * destAspect;
-    sx = (sourceWidth - sw) / 2;
-  } else if (sourceAspect < destAspect) {
-    sh = sourceWidth / destAspect;
-    sy = (sourceHeight - sh) / 2;
+  push();
+  tint(255, 255 * reveal);
+  image(this.assets.storyImage, drawX, drawY, drawW, drawH);
+  noTint();
+
+  // The facility is visible, but PRISM's damaged perception keeps it dim.
+  noStroke();
+  fill(0, 185 - reveal * 70);
+  rect(0, 0, width, height);
+
+  // A narrow cold light wakes up around PRISM before the rest of the room.
+  const lightStrength = constrain(map(elapsed, INTRO_CONFIG.revealStartMs, INTRO_CONFIG.revealEndMs, 0, 1), 0, 1);
+  for (let ring = 8; ring >= 1; ring -= 1) {
+    const ringSize = ring * 42 + lightStrength * 85;
+    const alpha = 4 + (9 - ring) * 2;
+    fill(120, 225, 235, alpha * lightStrength);
+    ellipse(220, 446, ringSize * 1.35, ringSize);
+  }
+  pop();
+};
+
+ChromasightGame.prototype.drawStoryRobot = function (elapsed) {
+  if (!this.assets.playerImage || !this.assets.playerMeta) return;
+  if (elapsed < 3600) return;
+
+  const robot = INTRO_CONFIG.robot;
+  let tileId = 0;
+  let yOffset = 0;
+  let alpha = 255;
+
+  if (elapsed < INTRO_CONFIG.revealStartMs) {
+    // Only the monitor/eye is perceptible in the darkness.
+    alpha = 0;
+  } else if (elapsed < INTRO_CONFIG.standStartMs) {
+    tileId = GAME_CONFIG.playerIdleTileIds[Math.floor(elapsed / 420) % GAME_CONFIG.playerIdleTileIds.length];
+    yOffset = 12;
+  } else if (elapsed < INTRO_CONFIG.standEndMs) {
+    const standT = constrain(map(elapsed, INTRO_CONFIG.standStartMs, INTRO_CONFIG.standEndMs, 0, 1), 0, 1);
+    tileId = GAME_CONFIG.playerWalkingTileIds[Math.floor(elapsed / 170) % GAME_CONFIG.playerWalkingTileIds.length];
+    yOffset = lerp(18, 0, easeOutCubic(standT));
+  } else {
+    tileId = GAME_CONFIG.playerIdleTileIds[Math.floor(elapsed / 650) % GAME_CONFIG.playerIdleTileIds.length];
   }
 
-  image(media, dx, dy, dw, dh, sx, sy, sw, sh);
+  if (alpha > 0) {
+    const frame = frameFromTileId(tileId, this.assets.playerMeta);
+    push();
+    tint(205, 215, 220, alpha);
+    image(
+      this.assets.playerImage,
+      robot.x,
+      robot.y + yOffset,
+      robot.w,
+      robot.h,
+      frame.sx,
+      frame.sy,
+      frame.sw,
+      frame.sh
+    );
+    noTint();
+    pop();
+  }
+
+  // Screen boot glow: visible before the body can be seen.
+  if (elapsed >= 3600 && elapsed < 15400) {
+    const pulse = 0.55 + Math.sin(elapsed * 0.012) * 0.25;
+    push();
+    noStroke();
+    fill(120, 255, 228, 160 * pulse);
+    rect(robot.x + 27, robot.y + yOffset + 21, 11, 5, 1);
+    fill(160, 255, 240, 42 * pulse);
+    rect(robot.x + 22, robot.y + yOffset + 17, 21, 13, 2);
+    pop();
+  }
+};
+
+ChromasightGame.prototype.drawStoryBeat = function (beat, elapsed) {
+  const localElapsed = elapsed - beat.start;
+
+  if (beat.kind === "sound" || beat.kind === "system") {
+    const flicker = beat.kind === "system" && Math.floor(elapsed / 110) % 2 === 0;
+    push();
+    textAlign(CENTER, CENTER);
+    textStyle(BOLD);
+    textSize(beat.kind === "system" ? 22 : 20);
+    fill(flicker ? 140 : 220, flicker ? 255 : 230, flicker ? 225 : 230);
+    text(typewriterText(beat.text, localElapsed, 30), width / 2, height * 0.48);
+    if (beat.note) {
+      textStyle(NORMAL);
+      textSize(13);
+      fill(175, 190, 198);
+      text(`(${beat.note})`, width / 2, height * 0.48 + 29);
+    }
+    pop();
+    return;
+  }
+
+  const box = INTRO_CONFIG.dialogueBox;
+  push();
+  noStroke();
+  fill(5, 9, 13, 225);
+  rect(box.x + 4, box.y + 5, box.w, box.h, 3);
+  stroke(80, 103, 112);
+  strokeWeight(2);
+  fill(15, 22, 28, 242);
+  rect(box.x, box.y, box.w, box.h, 3);
+  stroke(140, 244, 226, 95);
+  strokeWeight(1);
+  line(box.x + 14, box.y + 31, box.x + box.w - 14, box.y + 31);
+
+  noStroke();
+  fill(132, 245, 226);
+  textAlign(LEFT, TOP);
+  textStyle(BOLD);
+  textSize(13);
+  text("PRISM-256", box.x + 18, box.y + 11);
+
+  fill(235);
+  textStyle(NORMAL);
+  textSize(19);
+  text(
+    typewriterText(beat.text, localElapsed, 34),
+    box.x + 18,
+    box.y + 46,
+    box.w - 36,
+    box.h - 52
+  );
+  pop();
+};
+
+ChromasightGame.prototype.drawStoryMemoryGlitch = function (elapsed) {
+  const intensity = 1 - Math.abs(
+    map(elapsed, INTRO_CONFIG.memoryStartMs, INTRO_CONFIG.memoryEndMs, -1, 1)
+  );
+
+  push();
+  noStroke();
+  for (let i = 0; i < 9; i += 1) {
+    const bandY = (i * 67 + Math.floor(elapsed / 34) * 19) % height;
+    const bandH = 2 + (i % 3) * 3;
+    const jitter = ((i * 31 + Math.floor(elapsed / 45)) % 13) - 6;
+    fill(i % 2 === 0 ? 120 : 235, 245, 240, 20 + intensity * 28);
+    rect(jitter, bandY, width, bandH);
+  }
+
+  if (Math.floor(elapsed / 95) % 5 === 0) {
+    fill(225, 245, 240, 26 + intensity * 38);
+    rect(0, 0, width, height);
+  }
+
+  fill(130, 250, 224, 180);
+  textAlign(LEFT, TOP);
+  textSize(11);
+  text("MEMORY BUFFER // PARTIAL SIGNAL", 20, 18);
+  pop();
+};
+
+ChromasightGame.prototype.drawStorySystemPopup = function (elapsed) {
+  const panelW = 670;
+  const panelH = 254;
+  const panelX = (width - panelW) / 2;
+  const panelY = (height - panelH) / 2 - 8;
+  const appear = constrain(map(elapsed, INTRO_CONFIG.systemStartMs, INTRO_CONFIG.systemStartMs + 500, 0, 1), 0, 1);
+
+  push();
+  translate(0, (1 - easeOutCubic(appear)) * 14);
+  noStroke();
+  fill(0, 0, 0, 160 * appear);
+  rect(panelX + 8, panelY + 9, panelW, panelH, 4);
+  stroke(97, 128, 136, 220 * appear);
+  strokeWeight(2);
+  fill(9, 18, 22, 244 * appear);
+  rect(panelX, panelY, panelW, panelH, 4);
+  stroke(125, 255, 225, 110 * appear);
+  line(panelX + 18, panelY + 49, panelX + panelW - 18, panelY + 49);
+
+  noStroke();
+  fill(135, 255, 226, 255 * appear);
+  textAlign(LEFT, TOP);
+  textStyle(BOLD);
+  textSize(15);
+  text("PRISM-256 // RECOVERY DIRECTIVE", panelX + 22, panelY + 17);
+
+  let rowY = panelY + 72;
+  for (const lineData of INTRO_CONFIG.systemLines) {
+    if (elapsed < lineData.at) continue;
+    const localElapsed = elapsed - lineData.at;
+    fill(118, 190, 183, 255 * appear);
+    textStyle(BOLD);
+    textSize(12);
+    text(`${lineData.label}:`, panelX + 24, rowY);
+    fill(235, 242, 240, 255 * appear);
+    textStyle(NORMAL);
+    textSize(16);
+    text(typewriterText(lineData.text, localElapsed, 26), panelX + 156, rowY - 2);
+    rowY += 41;
+  }
+
+  if (this.storyComplete) {
+    const pulse = 160 + Math.sin(elapsed * 0.007) * 75;
+    fill(130, 255, 225, pulse);
+    textStyle(NORMAL);
+    textSize(12);
+    textAlign(CENTER, TOP);
+    text("DIRECTIVE LOADED // CONTINUE TO FACILITY", width / 2, panelY + panelH - 27);
+  }
+  pop();
+};
+
+ChromasightGame.prototype.drawStorySkipButton = function () {
+  const button = this.storySkipButton;
+  push();
+  noStroke();
+  fill(7, 12, 16, 170);
+  rect(button.x, button.y, button.w, button.h, 6);
+  stroke(126, 154, 160, 120);
+  noFill();
+  rect(button.x + 0.5, button.y + 0.5, button.w - 1, button.h - 1, 6);
+  noStroke();
+  fill(200, 214, 216);
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  textSize(14);
+  text("Skip", button.x + button.w / 2, button.y + button.h / 2);
+  pop();
+};
+
+ChromasightGame.prototype.drawStoryScanlines = function () {
+  push();
+  noStroke();
+  fill(0, 0, 0, 24);
+  for (let y = 0; y < height; y += 4) rect(0, y, width, 1);
+  pop();
+};
+
+function typewriterText(text, elapsedMs, millisecondsPerCharacter = 32) {
+  const count = Math.max(0, Math.floor(elapsedMs / millisecondsPerCharacter));
+  return String(text).slice(0, count);
+}
+
+function easeOutCubic(value) {
+  const t = constrain(value, 0, 1);
+  return 1 - Math.pow(1 - t, 3);
 }
 
 ChromasightGame.prototype.drawWorld = function () {
