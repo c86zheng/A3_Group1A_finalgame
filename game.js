@@ -944,12 +944,19 @@ class ChromasightGame {
   getActiveTextDisplays() {
     return this.textBoxes.filter((textBox) => {
       if (textBox.name === "Hint_03" && this.hasCollectedBlueKey()) return false;
+      if (textBox.name === "Hint_04" && this.hasCollectedBook("level_1", "book_02")) return false;
       return rectsOverlap(this.player, textBox);
     });
   }
 
   hasCollectedBlueKey() {
     return this.unlockedModes.has("blueBlindness");
+  }
+
+  hasCollectedBook(levelName, bookName) {
+    const book = findBookByName(this.assets.maps?.[levelName], bookName);
+    if (!book) return false;
+    return this.collectedBookKeys.has(bookCollectionKey(levelName, book));
   }
 
   switchMode(direction) {
@@ -1317,6 +1324,27 @@ function collectedBookKeysFromSave(maps, saveData) {
 
 function bookCollectionKey(levelName, item) {
   return `${levelName}:${item.id}`;
+}
+
+function findBookByName(map, bookName) {
+  for (const layer of map?.layers || []) {
+    if (layer.type !== "objectgroup" || !Array.isArray(layer.objects)) continue;
+    const book = layer.objects.find((object) => (
+      object.type === ObjectTypes.book &&
+      object.name === bookName
+    ));
+    if (book) {
+      return {
+        id: book.id,
+        name: book.name || "",
+        type: book.type || "",
+        x: Number(book.x || 0),
+        y: Number(book.y || 0)
+      };
+    }
+  }
+
+  return null;
 }
 
 function rectsOverlap(a, b) {
